@@ -1,197 +1,223 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-2MQ72GGQNQ"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-2MQ72GGQNQ');
-</script>
+  <!--
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-2MQ72GGQNQ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  
+    gtag('config', 'G-2MQ72GGQNQ');
+  </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>tarchat: decentralized FOSS chat with AI</title>
+    <style>
+      /* Terminal look styling */
+      body {
+        background-color: #000;
+        color: #00ff00;
+        font-family: 'Courier New', Courier, monospace;
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      #chat {
+        flex: 1;
+        padding: 10px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+      #input-area {
+        border-top: 1px solid #00ff00;
+        padding: 10px;
+        display: flex;
+        align-items: center;
+      }
+      #input-area span {
+        margin-right: 5px;
+      }
+      #input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        outline: none;
+        color: #00ff00;
+        font-size: 16px;
+      }
+      /* Clear Chat button styling */
+      #clearButton {
+        background-color: #222;
+        color: #00ff00;
+        border: 1px solid #00ff00;
+        padding: 5px 10px;
+        margin: 10px;
+        cursor: pointer;
+        font-family: 'Courier New', Courier, monospace;
+      }
+      #clearButton:hover {
+        background-color: #333;
+      }
+    </style>
+    <!-- Include Gun.js from a CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <!-- Include RiveScript from a CDN -->
+    <script src="https://unpkg.com/rivescript@latest/dist/rivescript.min.js"></script>
+  </head>
+  <body>
+    <!-- Clear Chat Button -->
+    <button id="clearButton">Clear Chat</button>
+    <!-- Chat messages will appear here -->
+    <div id="chat"></div>
+    <!-- Input area with a terminal prompt -->
+    <div id="input-area">
+      <span>&gt;</span>
+      <input type="text" id="input" autocomplete="off" placeholder="Type a message...">
+    </div>
+  
+    <script>
+      // Initialize Gun with an explicit relay peer for better reliability.
+      var gun = Gun({
+        peers: ['https://gun-manhattan.herokuapp.com/gun']
+      });
+      // Get the chat room node.
+      var messages = gun.get('chat-room');
+  
+      // Ask for a nickname; store it in localStorage so users don't have to reenter.
+      var nickname = localStorage.getItem('nickname');
+      if (!nickname) {
+        nickname = prompt("Enter your nickname:") || "Anonymous";
+        localStorage.setItem('nickname', nickname);
+      }
+  
+      var chat = document.getElementById('chat');
+      var input = document.getElementById('input');
+      var clearButton = document.getElementById('clearButton');
+  
+      // Object to track already displayed messages to avoid duplicates.
+      var displayedMessages = {};
+  
+      // Append a message to the chat display with a formatted timestamp.
+      function appendMessage(sender, message, timestamp) {
+        var div = document.createElement('div');
+        var timeStr = new Date(timestamp).toLocaleTimeString();
+        div.textContent = "[" + timeStr + "] " + sender + ": " + message;
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+      }
+  
+      // ------------------------------
+      // AI Chatbot using RiveScript
+      // ------------------------------
+      var bot = new RiveScript();
+      // Load a simple set of RiveScript rules.
+      bot.stream(\`
+  + hello
+  - Hello there!
+  
+  + hi
+  - Hi, how can I help you?
+  
+  + how are you
+  - I'm doing well, thanks for asking!
+  
+  + *
+  - I heard you say "<star>". Can you tell me more?
+      \`);
+      bot.sortReplies();
+  
+      // Variables to manage bot response scheduling.
+      var pendingBotResponse = false;
+      var lastUserMessage = '';
+  
+      function scheduleBotReply() {
+        if (pendingBotResponse) return;
+        pendingBotResponse = true;
+        // Delay bot reply by 2 seconds.
+        setTimeout(function() {
+          bot.reply("localuser", lastUserMessage).then(function(reply) {
+            messages.set({
+              sender: "AI",
+              message: reply,
+              timestamp: Date.now()
+            });
+            pendingBotResponse = false;
+          }).catch(function(error) {
+            console.error("Bot reply error:", error);
+            pendingBotResponse = false;
+          });
+        }, 2000);
+      }
+  
+      // ------------------------------
+      // Chat Message Handling
+      // ------------------------------
+      messages.map().on(function(data, key) {
+        if (data && !displayedMessages[key]) {
+          displayedMessages[key] = true;
+          appendMessage(data.sender, data.message, data.timestamp);
+          // If the message is from a user (not AI), trigger the bot.
+          if (data.sender !== "AI") {
+            lastUserMessage = data.message;
+            scheduleBotReply();
+          }
+        }
+      });
+  
+      // Send a message when the user presses Enter.
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && input.value.trim() !== "") {
+          var msg = input.value.trim();
+          messages.set({
+            sender: nickname,
+            message: msg,
+            timestamp: Date.now()
+          });
+          input.value = "";
+        }
+      });
+  
+      // Clear Chat Button: remove all messages from Gun and clear the chat window.
+      clearButton.addEventListener('click', function() {
+        if (confirm("Are you sure you want to clear the chat for everyone?")) {
+          messages.map().once(function(data, key) {
+            if (key) {
+              messages.get(key).put(null);
+            }
+          });
+          chat.innerHTML = "";
+          displayedMessages = {};
+        }
+      });
+    </script>
+  </body>
+  </html>
+  -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>tarchat: decentralized FOSS chat with AI</title>
   <style>
-    /* Terminal look styling */
+    /* Minimal styling for the placeholder page */
     body {
       background-color: #000;
       color: #00ff00;
       font-family: 'Courier New', Courier, monospace;
-      margin: 0;
-      padding: 0;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-    #chat {
-      flex: 1;
-      padding: 10px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
-    #input-area {
-      border-top: 1px solid #00ff00;
-      padding: 10px;
       display: flex;
       align-items: center;
-    }
-    #input-area span {
-      margin-right: 5px;
-    }
-    #input {
-      flex: 1;
-      background: transparent;
-      border: none;
-      outline: none;
-      color: #00ff00;
-      font-size: 16px;
-    }
-    /* Clear Chat button styling */
-    #clearButton {
-      background-color: #222;
-      color: #00ff00;
-      border: 1px solid #00ff00;
-      padding: 5px 10px;
-      margin: 10px;
-      cursor: pointer;
-      font-family: 'Courier New', Courier, monospace;
-    }
-    #clearButton:hover {
-      background-color: #333;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
     }
   </style>
-  <!-- Include Gun.js from a CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
-  <!-- Include RiveScript from a CDN -->
-  <script src="https://unpkg.com/rivescript@latest/dist/rivescript.min.js"></script>
 </head>
 <body>
-  <!-- Clear Chat Button -->
-  <button id="clearButton">Clear Chat</button>
-  <!-- Chat messages will appear here -->
-  <div id="chat"></div>
-  <!-- Input area with a terminal prompt -->
-  <div id="input-area">
-    <span>&gt;</span>
-    <input type="text" id="input" autocomplete="off" placeholder="Type a message...">
-  </div>
-
-  <script>
-    // Initialize Gun with an explicit relay peer for better reliability.
-    var gun = Gun({
-      peers: ['https://gun-manhattan.herokuapp.com/gun']
-    });
-    // Get the chat room node.
-    var messages = gun.get('chat-room');
-
-    // Ask for a nickname; store it in localStorage so users don't have to reenter.
-    var nickname = localStorage.getItem('nickname');
-    if (!nickname) {
-      nickname = prompt("Enter your nickname:") || "Anonymous";
-      localStorage.setItem('nickname', nickname);
-    }
-
-    var chat = document.getElementById('chat');
-    var input = document.getElementById('input');
-    var clearButton = document.getElementById('clearButton');
-
-    // Object to track already displayed messages to avoid duplicates.
-    var displayedMessages = {};
-
-    // Append a message to the chat display with a formatted timestamp.
-    function appendMessage(sender, message, timestamp) {
-      var div = document.createElement('div');
-      var timeStr = new Date(timestamp).toLocaleTimeString();
-      div.textContent = "[" + timeStr + "] " + sender + ": " + message;
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-    }
-
-    // ------------------------------
-    // AI Chatbot using RiveScript
-    // ------------------------------
-    var bot = new RiveScript();
-    // Load a simple set of RiveScript rules.
-    bot.stream(`
-+ hello
-- Hello there!
-
-+ hi
-- Hi, how can I help you?
-
-+ how are you
-- I'm doing well, thanks for asking!
-
-+ *
-- I heard you say "<star>". Can you tell me more?
-    `);
-    bot.sortReplies();
-
-    // Variables to manage bot response scheduling.
-    var pendingBotResponse = false;
-    var lastUserMessage = '';
-
-    function scheduleBotReply() {
-      if (pendingBotResponse) return;
-      pendingBotResponse = true;
-      // Delay bot reply by 2 seconds.
-      setTimeout(function() {
-        bot.reply("localuser", lastUserMessage).then(function(reply) {
-          messages.set({
-            sender: "AI",
-            message: reply,
-            timestamp: Date.now()
-          });
-          pendingBotResponse = false;
-        }).catch(function(error) {
-          console.error("Bot reply error:", error);
-          pendingBotResponse = false;
-        });
-      }, 2000);
-    }
-
-    // ------------------------------
-    // Chat Message Handling
-    // ------------------------------
-    messages.map().on(function(data, key) {
-      if (data && !displayedMessages[key]) {
-        displayedMessages[key] = true;
-        appendMessage(data.sender, data.message, data.timestamp);
-        // If the message is from a user (not AI), trigger the bot.
-        if (data.sender !== "AI") {
-          lastUserMessage = data.message;
-          scheduleBotReply();
-        }
-      }
-    });
-
-    // Send a message when the user presses Enter.
-    input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && input.value.trim() !== "") {
-        var msg = input.value.trim();
-        messages.set({
-          sender: nickname,
-          message: msg,
-          timestamp: Date.now()
-        });
-        input.value = "";
-      }
-    });
-
-    // Clear Chat Button: remove all messages from Gun and clear the chat window.
-    clearButton.addEventListener('click', function() {
-      if (confirm("Are you sure you want to clear the chat for everyone?")) {
-        messages.map().once(function(data, key) {
-          if (key) {
-            messages.get(key).put(null);
-          }
-        });
-        chat.innerHTML = "";
-        displayedMessages = {};
-      }
-    });
-  </script>
+  <h1>ai coming soon</h1>
 </body>
 </html>
